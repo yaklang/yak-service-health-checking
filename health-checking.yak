@@ -336,11 +336,14 @@ startHealthCheckScheduler = func() {
 startHTTPServer = func() {
     log.info("Starting HTTP server on 0.0.0.0:%d", port)
     
+    pwd = os.Getwd()~
+
     // 读取 HTML 文件（尝试多个可能的路径）
     possiblePaths = [
         "apps/health-checking/index.html",
         "index.html",
-        "./index.html"
+        "./index.html",
+        file.Join(pwd, "yak-services-health-checking", `index.html`),
     ]
     
     htmlContent = []
