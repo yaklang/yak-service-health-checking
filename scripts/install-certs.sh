@@ -141,7 +141,9 @@ else
     if command -v apt &> /dev/null; then
         print_message "info" "Debian/Ubuntu detected, using APT..."
         if [[ "$auto_confirm" == true ]]; then
-            sudo apt update -qq
+            # Set non-interactive mode for apt
+            export DEBIAN_FRONTEND=noninteractive
+            sudo apt update -qq >/dev/null 2>&1
             sudo apt install -y nginx cron curl socat netcat-openbsd >/dev/null 2>&1
         else
             sudo apt update
@@ -156,8 +158,15 @@ else
             sudo yum install -y epel-release
             sudo yum install -y nginx cronie curl socat nc
         fi
+    elif command -v dnf &> /dev/null; then
+        print_message "info" "Fedora detected, using DNF..."
+        if [[ "$auto_confirm" == true ]]; then
+            sudo dnf install -y nginx cron curl socat nc >/dev/null 2>&1
+        else
+            sudo dnf install -y nginx cron curl socat nc
+        fi
     else
-        print_message "error" "Unsupported package manager"
+        print_message "error" "Unsupported package manager. Supported: apt, yum, dnf"
         exit 1
     fi
 
@@ -176,32 +185,103 @@ else
         exit 1
     fi
     
-    print_message "info" "Installing acme.sh with email: $email"
-    curl https://get.acme.sh | sh -s email=$email
-    source ~/.bashrc
-
-    # SSL certificate issuance
-    print_message "info" "Issuing SSL certificate..."
-    ~/.acme.sh/acme.sh --issue --standalone -d $domain --pre-hook "systemctl stop nginx" --post-hook "systemctl start nginx"
-
-    if [ $? -ne 0 ]; then
-        print_message "error" "Certificate issuance failed"
+    # Check if acme.sh is already installed
+    if [ -f ~/.acme.sh/acme.sh ]; then
+        print_message "info" "acme.sh is already installed, skipping installation"
+    else
+        print_message "info" "Installing acme.sh with email: $email"
+        if [[ "$auto_confirm" == true ]]; then
+            curl -s https://get.acme.sh | sh -s email=$email >/dev/null 2>&1
+        else
+            curl https://get.acme.sh | sh -s email=$email
+        fi
+    fi
+    
+    # Ensure acme.sh is in PATH
+    if [ -f ~/.acme.sh/acme.sh ]; then
+        export PATH="$HOME/.acme.sh:$PATH"
+    else
+        print_message "error" "acme.sh installation failed"
         exit 1
     fi
 
+    # SSL certificate issuance
+    print_message "info" "Checking existing certificates..."
+    
+    # Check if certificate already exists in acme.sh
+    if ~/.acme.sh/acme.sh --list | grep -q "$domain"; then
+        print_message "info" "Certificate for $domain already exists in acme.sh"
+        # Try to renew if needed
+        print_message "info" "Attempting to renew certificate if necessary..."
+        ~/.acme.sh/acme.sh --renew -d $domain --force >/dev/null 2>&1 || {
+            print_message "info" "Certificate renewal not needed or failed, continuing with existing certificate"
+        }
+    else
+        print_message "info" "Issuing new SSL certificate for $domain..."
+        
+        # Stop nginx if running to avoid port conflicts
+        if systemctl is-active nginx >/dev/null 2>&1; then
+            print_message "info" "Stopping nginx for certificate issuance..."
+            sudo systemctl stop nginx
+            nginx_was_running=true
+        else
+            nginx_was_running=false
+        fi
+        
+        # Issue certificate
+        if ~/.acme.sh/acme.sh --issue --standalone -d $domain; then
+            print_message "success" "Certificate issued successfully"
+        else
+            print_message "error" "Certificate issuance failed"
+            # Restart nginx if it was running
+            if [ "$nginx_was_running" = true ]; then
+                sudo systemctl start nginx
+            fi
+            exit 1
+        fi
+        
+        # Restart nginx if it was running
+        if [ "$nginx_was_running" = true ]; then
+            sudo systemctl start nginx
+        fi
+    fi
+
     # Certificate installation
+    print_message "info" "Installing certificate to nginx directory..."
     sudo mkdir -p $cert_path
-    sudo ~/.acme.sh/acme.sh --install-cert -d $domain \
+    
+    # Install certificate (this is safe to run multiple times)
+    if sudo ~/.acme.sh/acme.sh --install-cert -d $domain \
         --cert-file $cert_path/cert.pem \
         --key-file $cert_path/key.pem \
-        --fullchain-file $cert_path/fullchain.pem
+        --fullchain-file $cert_path/fullchain.pem; then
+        print_message "success" "Certificate installed successfully"
+    else
+        print_message "error" "Certificate installation failed"
+        exit 1
+    fi
 
-    # Set up auto-renewal
-    (crontab -l 2>/dev/null; echo "0 0 * * 0 ~/.acme.sh/acme.sh --cron --home ~/.acme.sh && systemctl reload nginx") | crontab -
+    # Set up auto-renewal (check if already exists)
+    renewal_cron="0 0 * * 0 ~/.acme.sh/acme.sh --cron --home ~/.acme.sh && systemctl reload nginx"
+    if ! crontab -l 2>/dev/null | grep -F "acme.sh --cron" >/dev/null; then
+        print_message "info" "Setting up auto-renewal cron job..."
+        (crontab -l 2>/dev/null; echo "$renewal_cron") | crontab -
+        print_message "success" "Auto-renewal cron job added"
+    else
+        print_message "info" "Auto-renewal cron job already exists"
+    fi
 fi
 
 # Generate Nginx configuration
 config_file="/etc/nginx/sites-available/$domain.conf"
+print_message "info" "Generating Nginx configuration for $domain..."
+
+# Backup existing configuration if it exists
+if [ -f "$config_file" ]; then
+    print_message "info" "Backing up existing configuration..."
+    sudo cp "$config_file" "$config_file.backup.$(date +%Y%m%d_%H%M%S)"
+fi
+
 sudo tee $config_file > /dev/null <<EOL
 server {
     listen 443 ssl http2;
@@ -290,7 +370,11 @@ EOL
 
 # Enable configuration
 if [ -d "/etc/nginx/sites-enabled" ]; then
+    print_message "info" "Enabling Nginx site configuration..."
     sudo ln -sf $config_file /etc/nginx/sites-enabled/
+    print_message "success" "Nginx configuration enabled"
+else
+    print_message "info" "sites-enabled directory not found, configuration placed in sites-available only"
 fi
 
 # Create management script if it doesn't exist
@@ -317,12 +401,37 @@ EOL
 fi
 
 # Test Nginx configuration and manage service
-if sudo nginx -t; then
+print_message "info" "Testing Nginx configuration..."
+if sudo nginx -t 2>/dev/null; then
+    print_message "success" "Nginx configuration test passed"
+    
     if systemctl is-active nginx >/dev/null 2>&1; then
-        sudo systemctl reload nginx
+        print_message "info" "Reloading Nginx configuration..."
+        if sudo systemctl reload nginx; then
+            print_message "success" "Nginx reloaded successfully"
+        else
+            print_message "error" "Nginx reload failed"
+            exit 1
+        fi
     else
-        sudo systemctl start nginx
+        print_message "info" "Starting Nginx service..."
+        if sudo systemctl start nginx; then
+            print_message "success" "Nginx started successfully"
+        else
+            print_message "error" "Nginx start failed"
+            exit 1
+        fi
     fi
+    
+    # Enable nginx to start on boot
+    if ! systemctl is-enabled nginx >/dev/null 2>&1; then
+        print_message "info" "Enabling Nginx to start on boot..."
+        sudo systemctl enable nginx >/dev/null 2>&1
+    fi
+else
+    print_message "error" "Nginx configuration test failed"
+    sudo nginx -t  # Show the actual error
+    exit 1
 fi
 
 print_message "success" "Deployment completed!"
