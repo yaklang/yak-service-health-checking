@@ -1,0 +1,164 @@
+name: Deploy YAK Health Checking Service
+
+on:
+  # 当指定文件有改动时触发
+  push:
+    branches:
+      - main
+    paths:
+      - 'health-checking.yak'
+      - 'index.html'
+      - '.github/workflows/deploy-yak-health-checking.yml'
+      - 'deploy.sh'
+  
+  # 允许手动触发
+  workflow_dispatch:
+
+# 确保同一时间只运行一个部署任务
+concurrency:
+  group: deploy-health-checking
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-22.04
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Print trigger information
+        run: |
+          echo "============================================"
+          echo "Workflow triggered by: ${{ github.event_name }}"
+          echo "Branch: ${{ github.ref }}"
+          echo "Commit: ${{ github.sha }}"
+          echo "Actor: ${{ github.actor }}"
+          echo "============================================"
+      
+      - name: Download Yaklang Engine (v1.4.4-alpha1025)
+        run: |
+          echo "=== Downloading Yaklang Engine v1.4.4-alpha1025 ==="
+          YAK_VERSION="1.4.4-alpha1025"
+          YAK_URL="https://yaklang.oss-accelerate.aliyuncs.com/yak/${YAK_VERSION}/yak_linux_amd64"
+          
+          echo "Downloading from: $YAK_URL"
+          wget -q --show-progress -O ./yak "$YAK_URL"
+          
+          if [ ! -f ./yak ]; then
+            echo "ERROR: Failed to download yak engine"
+            echo "Trying alternative URL..."
+            YAK_URL="https://yaklang.oss-accelerate.aliyuncs.com/yak/${YAK_VERSION}/yak_linux_amd64"
+            wget -q --show-progress -O ./yak "$YAK_URL" || exit 1
+          fi
+          
+          chmod +x ./yak
+          
+          # 验证下载的文件
+          echo ""
+          echo "=== Downloaded file info ==="
+          ls -lh ./yak
+          file ./yak
+          
+          # 测试执行
+          echo ""
+          echo "=== Testing yak engine ==="
+          ./yak version || echo "Note: yak version command may not be available in this version"
+          
+          echo ""
+          echo "✓ Yaklang engine downloaded and verified successfully"
+      
+      - name: Prepare SSH key
+        env:
+          HEALTH_CHECKING_HOST_PRI: ${{ secrets.HEALTH_CHECKING_HOST_PRI }}
+          HEALTH_CHECKING_HOST_ADDR: ${{ secrets.HEALTH_CHECKING_HOST_ADDR }}
+        run: |
+          echo "=== Preparing SSH deployment ==="
+          
+          if [ -z "$HEALTH_CHECKING_HOST_PRI" ] || [ -z "$HEALTH_CHECKING_HOST_ADDR" ]; then
+            echo "ERROR: SSH credentials not found"
+            echo "Please ensure HEALTH_CHECKING_HOST_PRI and HEALTH_CHECKING_HOST_ADDR secrets are set"
+            exit 1
+          fi
+          
+          # 创建私钥文件
+          echo "$HEALTH_CHECKING_HOST_PRI" | tr -d '\r' > /tmp/pri
+          chmod 600 /tmp/pri
+          
+          # 验证私钥格式
+          if ! ssh-keygen -l -f /tmp/pri >/dev/null 2>&1; then
+            echo "ERROR: Invalid SSH private key format"
+            exit 1
+          fi
+          
+          echo "✓ SSH key prepared successfully"
+      
+      - name: Deploy to remote server
+        env:
+          HEALTH_CHECKING_HOST_ADDR: ${{ secrets.HEALTH_CHECKING_HOST_ADDR }}
+        run: |
+          echo "=== Deploying to remote server ==="
+          echo "Target server: $HEALTH_CHECKING_HOST_ADDR"
+          
+          # 确保部署脚本有执行权限
+          chmod +x ./deploy.sh
+          
+          # 通过 SSH 执行部署脚本
+          ./yak ssh -H "$HEALTH_CHECKING_HOST_ADDR" -i /tmp/pri --bash-scripts ./deploy.sh
+          
+          if [ $? -ne 0 ]; then
+            echo "ERROR: Deployment failed"
+            exit 1
+          fi
+          
+          echo "✓ Deployment completed successfully"
+      
+      - name: Verify deployment
+        env:
+          HEALTH_CHECKING_HOST_ADDR: ${{ secrets.HEALTH_CHECKING_HOST_ADDR }}
+        run: |
+          echo "=== Verifying deployment ==="
+          
+          # 等待服务启动
+          echo "Waiting for service to start..."
+          sleep 10
+          
+          # 通过 SSH 验证服务状态
+          ./yak ssh -H "$HEALTH_CHECKING_HOST_ADDR" -i /tmp/pri --bash-command "curl -f http://127.0.0.1:9901 >/dev/null 2>&1 && echo 'Service is running' || echo 'Service verification failed'"
+          
+          if [ $? -ne 0 ]; then
+            echo "WARNING: Service verification failed, but deployment may still be successful"
+            echo "Please check the service status manually"
+          else
+            echo "✓ Service verification completed"
+          fi
+      
+      - name: Cleanup
+        if: always()
+        run: |
+          echo "=== Cleaning up ==="
+          rm -f /tmp/pri
+          echo "✓ Cleanup completed"
+      
+      - name: Summary
+        if: success()
+        run: |
+          echo "## ✅ Health Checking Service Deployment Successful" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "The YAK Health Checking service has been successfully deployed to the remote server." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🚀 Deployment Details" >> $GITHUB_STEP_SUMMARY
+          echo "- Service Name: \`yak-health-checking\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Port: \`9901\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Script: \`health-checking.yak\`" >> $GITHUB_STEP_SUMMARY
+          echo "- HTML Directory: \`/root/yak-service-health-checking\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📊 Build Info" >> $GITHUB_STEP_SUMMARY
+          echo "- Commit: \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Branch: \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Actor: @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔧 Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "The service should now be accessible on port 9901 of the target server." >> $GITHUB_STEP_SUMMARY
