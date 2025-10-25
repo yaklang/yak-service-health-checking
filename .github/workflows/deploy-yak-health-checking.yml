@@ -10,6 +10,7 @@ on:
       - 'index.html'
       - '.github/workflows/deploy-yak-health-checking.yml'
       - 'deploy.sh'
+      - 'scripts/install-certs.sh'
   
   # 允许手动触发
   workflow_dispatch:
