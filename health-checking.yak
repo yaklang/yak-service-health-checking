@@ -39,6 +39,8 @@ port = cli.Int(
     cli.setHelp("监控服务监听端口")
 )
 
+htmlDir = cli.String("html-dir", cli.setDefault("/root/yak-services-health-checking/"))
+
 // 健康检查间隔
 interval = cli.Int(
     "interval",
@@ -343,7 +345,8 @@ startHTTPServer = func() {
         "apps/health-checking/index.html",
         "index.html",
         "./index.html",
-        file.Join(pwd, "yak-services-health-checking", `index.html`),
+        file.Join(pwd, "root", "yak-services-health-checking", `index.html`),
+        file.Join(htmlDir, `index.html`),
     ]
     
     htmlContent = []
