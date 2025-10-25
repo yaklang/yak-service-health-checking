@@ -106,7 +106,7 @@ jobs:
           chmod +x ./deploy.sh
           
           # 通过 SSH 执行部署脚本
-          ./yak ssh -H "$HEALTH_CHECKING_HOST_ADDR" -i /tmp/pri --bash-scripts ./deploy.sh
+          ./yak ssh -H "$HEALTH_CHECKING_HOST_ADDR" -i /tmp/pri --bash-script ./deploy.sh
           
           if [ $? -ne 0 ]; then
             echo "ERROR: Deployment failed"
@@ -126,7 +126,7 @@ jobs:
           sleep 10
           
           # 通过 SSH 验证服务状态
-          ./yak ssh -H "$HEALTH_CHECKING_HOST_ADDR" -i /tmp/pri --bash-command "curl -f http://127.0.0.1:9901 >/dev/null 2>&1 && echo 'Service is running' || echo 'Service verification failed'"
+          ./yak ssh -H "$HEALTH_CHECKING_HOST_ADDR" -i /tmp/pri --command "curl -f http://127.0.0.1:9901 >/dev/null 2>&1 && echo 'Service is running' || echo 'Service verification failed'"
           
           if [ $? -ne 0 ]; then
             echo "WARNING: Service verification failed, but deployment may still be successful"
