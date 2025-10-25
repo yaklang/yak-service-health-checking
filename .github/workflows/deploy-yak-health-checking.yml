@@ -135,6 +135,35 @@ jobs:
             echo "✓ Service verification completed"
           fi
       
+      - name: Install SSL Certificate (Optional)
+        if: ${{ vars.ENABLE_SSL == 'true' }}
+        env:
+          HEALTH_CHECKING_HOST_ADDR: ${{ secrets.HEALTH_CHECKING_HOST_ADDR }}
+          SSL_DOMAIN: ${{ vars.SSL_DOMAIN }}
+          SSL_EMAIL: ${{ secrets.SSL_EMAIL }}
+        run: |
+          echo "=== Installing SSL Certificate ==="
+          
+          if [ -z "$SSL_DOMAIN" ] || [ -z "$SSL_EMAIL" ]; then
+            echo "WARNING: SSL_DOMAIN or SSL_EMAIL not configured, skipping SSL installation"
+            echo "To enable SSL, set the following repository variables/secrets:"
+            echo "  - Variable: ENABLE_SSL=true"
+            echo "  - Variable: SSL_DOMAIN=your-domain.com"
+            echo "  - Secret: SSL_EMAIL=your-email@example.com"
+            exit 0
+          fi
+          
+          echo "Installing SSL certificate for domain: $SSL_DOMAIN"
+          
+          # 通过 SSH 执行证书安装脚本
+          ./yak ssh -H "$HEALTH_CHECKING_HOST_ADDR" -i /tmp/pri --command "cd /root/yak-service-health-checking && ./scripts/install-certs.sh --domain '$SSL_DOMAIN' --port 9901 --email '$SSL_EMAIL' -y"
+          
+          if [ $? -eq 0 ]; then
+            echo "✓ SSL certificate installation completed"
+          else
+            echo "WARNING: SSL certificate installation failed, but deployment continues"
+          fi
+      
       - name: Cleanup
         if: always()
         run: |
@@ -160,5 +189,17 @@ jobs:
           echo "- Branch: \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- Actor: @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 🔧 Next Steps" >> $GITHUB_STEP_SUMMARY
-          echo "The service should now be accessible on port 9901 of the target server." >> $GITHUB_STEP_SUMMARY
+          echo "### 🔧 Access Information" >> $GITHUB_STEP_SUMMARY
+          echo "- HTTP: http://\${server-ip}:9901" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ vars.ENABLE_SSL }}" = "true" ] && [ -n "${{ vars.SSL_DOMAIN }}" ]; then
+            echo "- HTTPS: https://${{ vars.SSL_DOMAIN }}" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔒 SSL Configuration" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ vars.ENABLE_SSL }}" = "true" ]; then
+            echo "- SSL Enabled: ✅" >> $GITHUB_STEP_SUMMARY
+            echo "- Domain: ${{ vars.SSL_DOMAIN }}" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- SSL Enabled: ❌" >> $GITHUB_STEP_SUMMARY
+            echo "- To enable SSL, configure ENABLE_SSL, SSL_DOMAIN, and SSL_EMAIL" >> $GITHUB_STEP_SUMMARY
+          fi

@@ -17,22 +17,105 @@ print_message() {
     esac
 }
 
-# Get domain and port first
-read -p "[?] Please enter domain name (e.g., example.com): " domain
-read -p "[?] Please enter local service port (1-65535): " port
+# Function to show usage
+show_usage() {
+    echo "Usage: $0 [OPTIONS]"
+    echo ""
+    echo "Options:"
+    echo "  --domain DOMAIN     Domain name (e.g., example.com)"
+    echo "  --port PORT         Local service port (1-65535)"
+    echo "  --email EMAIL       Email for SSL notifications"
+    echo "  -y, --yes          Auto-confirm all prompts (non-interactive mode)"
+    echo "  -h, --help         Show this help message"
+    echo ""
+    echo "Examples:"
+    echo "  $0 --domain health.yaklang.com --port 9901 --email admin@example.com -y"
+    echo "  $0 --domain example.com --port 8080 --email user@example.com"
+    echo ""
+}
+
+# Initialize variables
+domain=""
+port=""
+email=""
+auto_confirm=false
+
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --domain)
+            domain="$2"
+            shift 2
+            ;;
+        --port)
+            port="$2"
+            shift 2
+            ;;
+        --email)
+            email="$2"
+            shift 2
+            ;;
+        -y|--yes)
+            auto_confirm=true
+            shift
+            ;;
+        -h|--help)
+            show_usage
+            exit 0
+            ;;
+        *)
+            print_message "error" "Unknown option: $1"
+            show_usage
+            exit 1
+            ;;
+    esac
+done
+
+# Interactive mode if parameters not provided
+if [[ -z "$domain" ]]; then
+    if [[ "$auto_confirm" == true ]]; then
+        print_message "error" "Domain is required in non-interactive mode. Use --domain option."
+        exit 1
+    fi
+    read -p "[?] Please enter domain name (e.g., example.com): " domain
+fi
+
+if [[ -z "$port" ]]; then
+    if [[ "$auto_confirm" == true ]]; then
+        print_message "error" "Port is required in non-interactive mode. Use --port option."
+        exit 1
+    fi
+    read -p "[?] Please enter local service port (1-65535): " port
+fi
+
+# Validate domain format (supports subdomains)
+if [[ ! "$domain" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$ ]]; then
+    print_message "error" "Invalid domain format: $domain"
+    exit 1
+fi
 
 # Port validation
 if ! [[ "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
-    print_message "error" "Invalid port number"
+    print_message "error" "Invalid port number: $port"
     exit 1
 fi
+
+print_message "info" "Configuration:"
+print_message "info" "  Domain: $domain"
+print_message "info" "  Port: $port"
+print_message "info" "  Email: ${email:-'(will be requested)'}"
+print_message "info" "  Auto-confirm: $auto_confirm"
 
 # Check if port is in use
 if ! nc -z localhost $port; then
     print_message "error" "Port $port is not responding. Please check if your service is running"
-    read -p "Continue anyway? (y/n): " continue
-    if [[ "$continue" != "y" && "$continue" != "Y" ]]; then
-        exit 1
+    if [[ "$auto_confirm" == false ]]; then
+        read -p "Continue anyway? (y/n): " continue
+        if [[ "$continue" != "y" && "$continue" != "Y" ]]; then
+            exit 1
+        fi
+    else
+        print_message "info" "Auto-confirm mode: continuing despite port not responding"
     fi
 fi
 
@@ -44,28 +127,56 @@ if [ -f "$cert_path/fullchain.pem" ] && [ -f "$cert_path/key.pem" ]; then
 else
     skip_cert=false
     # Ask for installation only if cert doesn't exist
-    read -p "[?] Do you want to install required components (acme.sh/nginx/cron)? (y/n): " confirm
-    if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
-        print_message "error" "Installation cancelled by user"
-        exit 1
+    if [[ "$auto_confirm" == false ]]; then
+        read -p "[?] Do you want to install required components (acme.sh/nginx/cron)? (y/n): " confirm
+        if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+            print_message "error" "Installation cancelled by user"
+            exit 1
+        fi
+    else
+        print_message "info" "Auto-confirm mode: installing required components"
     fi
 
     # Package manager detection and installation
     if command -v apt &> /dev/null; then
         print_message "info" "Debian/Ubuntu detected, using APT..."
-        sudo apt update
-        sudo apt install -y nginx cron curl socat
+        if [[ "$auto_confirm" == true ]]; then
+            sudo apt update -qq
+            sudo apt install -y nginx cron curl socat netcat-openbsd >/dev/null 2>&1
+        else
+            sudo apt update
+            sudo apt install -y nginx cron curl socat netcat-openbsd
+        fi
     elif command -v yum &> /dev/null; then
         print_message "info" "RHEL/CentOS detected, using YUM..."
-        sudo yum install -y epel-release
-        sudo yum install -y nginx cronie curl socat
+        if [[ "$auto_confirm" == true ]]; then
+            sudo yum install -y epel-release >/dev/null 2>&1
+            sudo yum install -y nginx cronie curl socat nc >/dev/null 2>&1
+        else
+            sudo yum install -y epel-release
+            sudo yum install -y nginx cronie curl socat nc
+        fi
     else
         print_message "error" "Unsupported package manager"
         exit 1
     fi
 
     # Get email and install acme.sh if needed
-    read -p "[?] Please enter your email for SSL notifications: " email
+    if [[ -z "$email" ]]; then
+        if [[ "$auto_confirm" == true ]]; then
+            print_message "error" "Email is required in non-interactive mode. Use --email option."
+            exit 1
+        fi
+        read -p "[?] Please enter your email for SSL notifications: " email
+    fi
+    
+    # Validate email format
+    if [[ ! "$email" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]]; then
+        print_message "error" "Invalid email format"
+        exit 1
+    fi
+    
+    print_message "info" "Installing acme.sh with email: $email"
     curl https://get.acme.sh | sh -s email=$email
     source ~/.bashrc
 
