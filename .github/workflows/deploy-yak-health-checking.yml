@@ -129,8 +129,12 @@ jobs:
             
             # 上传 webhook 文件到服务器
             echo "Uploading webhook file to remote server..."
-            ./yak ssh -H "$HEALTH_CHECKING_HOST_ADDR" -i /tmp/pri --upload /tmp/lark.txt /root/lark.txt
-            echo "✓ Webhook file uploaded to /root/lark.txt"
+            ./yak ssh -H "$HEALTH_CHECKING_HOST_ADDR" -i /tmp/pri --upload-file /tmp/lark.txt
+            echo "✓ Webhook file uploaded to remote home directory"
+            
+            # 移动文件到目标位置
+            echo "Moving webhook file to /root/lark.txt..."
+            ./yak ssh -H "$HEALTH_CHECKING_HOST_ADDR" -i /tmp/pri --command "mv ~/lark.txt /root/lark.txt && echo 'Webhook file moved to /root/lark.txt'"
           else
             echo "No webhook configured, skipping webhook file creation"
           fi
