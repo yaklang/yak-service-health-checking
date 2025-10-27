@@ -69,6 +69,13 @@ mockAlert = cli.Bool(
     cli.setHelp("启用 Mock 报警测试模式，添加一个必定失败的健康检查用于测试报警功能")
 )
 
+// 报警间隔配置
+alertInterval = cli.Int(
+    "alert-interval",
+    cli.setDefault(3600),
+    cli.setHelp("报警间隔时间（秒），同一服务在此时间内不会重复报警，默认3600秒（1小时）")
+)
+
 var botClient
 
 // 验证参数
@@ -92,6 +99,7 @@ log.info("Configuration:")
 log.info("  Port: %d", port)
 log.info("  Check Interval: %d seconds", interval)
 log.info("  Request Timeout: %d seconds", timeout)
+log.info("  Alert Interval: %d seconds (%d minutes)", alertInterval, alertInterval/60)
 if botWebhook != "" {
     log.info("  Bot Webhook: %s", botWebhook)
     // 初始化 bot 客户端
@@ -208,10 +216,9 @@ log.info("Configured %d services for monitoring", len(serviceConfigs))
 healthData = []
 healthDataMutex = sync.NewMutex()
 
-// 报警状态跟踪 - 基于时间的报警频率控制（每小时报警一次）
+// 报警状态跟踪 - 基于时间的报警频率控制
 alertedServices = {}  // 已报警的服务及其最后报警时间 {"service_id": timestamp}
 alertedServicesMutex = sync.NewMutex()
-alertInterval = 3600  // 报警间隔：1小时（3600秒）
 
 log.info("Initialized health data storage with mutex lock")
 
