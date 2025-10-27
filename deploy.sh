@@ -168,13 +168,20 @@ echo "Installing systemd service..."
 # 构建脚本参数
 SCRIPT_ARGS="--port $SERVICE_PORT --html-dir $REPO_DIR"
 
-# 如果设置了 LARK_BOT_NOTIFY_WEBHOOK 环境变量，添加到脚本参数中
-if [ -n "$LARK_BOT_NOTIFY_WEBHOOK" ]; then
-    echo "Adding bot webhook to service arguments..."
-    echo "Webhook configured: ${LARK_BOT_NOTIFY_WEBHOOK:0:50}..." # 只显示前50个字符
-    SCRIPT_ARGS="$SCRIPT_ARGS --bot-webhook '$LARK_BOT_NOTIFY_WEBHOOK'"
+# 检查是否存在 webhook 文件
+WEBHOOK_FILE="/root/lark.txt"
+if [ -f "$WEBHOOK_FILE" ]; then
+    WEBHOOK_CONTENT=$(cat "$WEBHOOK_FILE" | tr -d '\n\r' | xargs)
+    if [ -n "$WEBHOOK_CONTENT" ]; then
+        echo "Adding bot webhook from file to service arguments..."
+        echo "Webhook file found: $WEBHOOK_FILE"
+        echo "Webhook configured: ${WEBHOOK_CONTENT:0:50}..." # 只显示前50个字符
+        SCRIPT_ARGS="$SCRIPT_ARGS --bot-webhook '$WEBHOOK_CONTENT'"
+    else
+        echo "Webhook file exists but is empty"
+    fi
 else
-    echo "No bot webhook configured for service"
+    echo "No webhook file found at $WEBHOOK_FILE"
 fi
 
 echo "Final script arguments: $SCRIPT_ARGS"
