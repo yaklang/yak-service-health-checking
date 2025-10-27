@@ -110,16 +110,19 @@ jobs:
           # 确保部署脚本有执行权限
           chmod +x ./deploy.sh
 
-          # 传递 webhook 参数给部署脚本
+          # 准备 webhook 参数（移除前后空格）
           if [ -n "$LARK_BOT_NOTIFY_WEBHOOK" ]; then
+            # 移除前后空格
+            CLEANED_WEBHOOK=$(echo "$LARK_BOT_NOTIFY_WEBHOOK" | xargs)
             echo "Bot webhook configured for deployment"
-            export LARK_BOT_NOTIFY_WEBHOOK="$LARK_BOT_NOTIFY_WEBHOOK"
+            echo "Webhook length: ${#CLEANED_WEBHOOK}"
           else
             echo "No bot webhook configured"
+            CLEANED_WEBHOOK=""
           fi
 
-          # 通过 SSH 执行部署脚本
-          ./yak ssh -H "$HEALTH_CHECKING_HOST_ADDR" -i /tmp/pri --bash-script ./deploy.sh
+          # 通过 SSH 执行部署脚本，传递清理后的 webhook
+          ./yak ssh -H "$HEALTH_CHECKING_HOST_ADDR" -i /tmp/pri --command "cd /root/yak-service-health-checking && LARK_BOT_NOTIFY_WEBHOOK='$CLEANED_WEBHOOK' ./deploy.sh"
 
           if [ $? -ne 0 ]; then
             echo "ERROR: Deployment failed"
