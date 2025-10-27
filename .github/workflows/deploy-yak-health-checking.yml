@@ -127,6 +127,10 @@ jobs:
             echo "$CLEANED_WEBHOOK" > /tmp/lark.txt
             echo "Webhook file created locally"
             
+            # 删除旧的 webhook 文件（如果存在）
+            echo "Removing old webhook file if exists..."
+            ./yak ssh -H "$HEALTH_CHECKING_HOST_ADDR" -i /tmp/pri --command "rm -f /root/lark.txt"
+            
             # 上传 webhook 文件到服务器
             echo "Uploading webhook file to remote server..."
             ./yak ssh -H "$HEALTH_CHECKING_HOST_ADDR" -i /tmp/pri --upload-file /tmp/lark.txt
