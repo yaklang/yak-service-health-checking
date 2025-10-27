@@ -415,14 +415,75 @@ sendHealthAlert = func(healthStatus) {
     }
 }
 
+// 发送服务恢复通知
+sendRecoveryNotification = func(healthStatus) {
+    if botClient == nil {
+        return
+    }
+    
+    log.info("Sending recovery notification for service: %s", healthStatus["service_id"])
+    
+    // 生成恢复通知消息
+    hostname, err = os.Hostname()
+    if err != nil {
+        hostname = "unknown"
+    }
+    
+    recoveryTime = time.Now().Format("2006-01-02 15:04:05")
+    
+    markdown = sprintf(`✅ 服务恢复通知
+
+## 🎉 服务已恢复正常
+- **服务名称**: %s
+- **服务ID**: %s
+- **检查URL**: %s
+- **主机**: %s
+- **恢复时间**: %s
+
+## 📊 当前状态
+- **状态码**: %d
+- **健康状态**: ✅ 正常
+- **检查详情**: %s
+
+---
+*服务已恢复正常运行*
+`, healthStatus["service_name"], healthStatus["service_id"], healthStatus["service_name_en"],
+   hostname, recoveryTime, healthStatus["status_code"], healthStatus["check_detail"])
+
+    // 发送恢复通知
+    try {
+        botClient.SendMarkdown(markdown)
+        log.info("Recovery notification sent for service: %s", healthStatus["service_id"])
+    } catch err {
+        log.error("Failed to send recovery notification for service %s: %v", healthStatus["service_id"], err)
+    }
+
+    // 发送简单文本通知（备用）
+    simpleMessage = sprintf("✅ 恢复: %s (%s) 服务已恢复正常 - 状态码:%d - %s",
+        healthStatus["service_name"], healthStatus["service_id"],
+        healthStatus["status_code"], recoveryTime)
+
+    try {
+        botClient.SendText(simpleMessage)
+    } catch err {
+        log.error("Failed to send simple recovery text for service %s: %v", healthStatus["service_id"], err)
+    }
+}
+
 // 清除报警状态（服务恢复时调用）
-clearAlertStatus = func(serviceId) {
+clearAlertStatus = func(serviceId, healthStatus) {
     alertedServicesMutex.Lock()
-    if serviceId in alertedServices {
+    wasAlerted = serviceId in alertedServices
+    if wasAlerted {
         delete(alertedServices, serviceId)
         log.info("Cleared alert status for service: %s", serviceId)
     }
     alertedServicesMutex.Unlock()
+    
+    // 如果之前有报警，现在恢复了，发送恢复通知
+    if wasAlerted && botClient != nil {
+        sendRecoveryNotification(healthStatus)
+    }
 }
 
 // =============================================================================
@@ -456,7 +517,7 @@ performHealthChecks = func() {
             sendHealthAlert(healthStatus)
         } else {
             // 服务恢复健康时，清除报警状态
-            clearAlertStatus(healthStatus["service_id"])
+            clearAlertStatus(healthStatus["service_id"], healthStatus)
         }
     }
     
