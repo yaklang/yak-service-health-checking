@@ -16,7 +16,7 @@ echo "============================================"
 REPO_URL="https://github.com/yaklang/yak-service-health-checking"
 REPO_DIR="/root/yak-service-health-checking"
 YAK_ENGINE_PATH="/usr/local/bin/yak"
-REQUIRED_VERSION="1.4.4-alpha1025"
+REQUIRED_VERSION="1.4.4-alpha1027"
 SERVICE_NAME="yak-health-checking"
 SERVICE_PORT="9901"
 
