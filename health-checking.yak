@@ -55,14 +55,157 @@ timeout = cli.Int(
     cli.setHelp("HTTP 请求超时时间（秒）")
 )
 
+// Bot 报警配置
+botWebhook = cli.String(
+    "bot-webhook",
+    cli.setDefault(""),
+    cli.setHelp("Bot webhook URL，用于发送报警通知")
+)
+
+// Mock 报警测试模式
+mockAlert = cli.Bool(
+    "mock-alert",
+    cli.setDefault(false),
+    cli.setHelp("启用 Mock 报警测试模式，添加一个必定失败的健康检查用于测试报警功能")
+)
+
+var botClient
+
 // 验证参数
 cli.check()
+
+// 如果未指定 webhook，尝试从本地文件读取
+if botWebhook == "" {
+    content, err = file.ReadFile("/tmp/lark.txt")
+    if err == nil {
+        botWebhook = str.TrimSpace(string(content))
+        log.info("Loaded webhook from /tmp/lark.txt")
+    } else {
+        log.info("No webhook configured (neither --bot-webhook nor /tmp/lark.txt found)")
+    }
+} else {
+    log.info("Using webhook from command line parameter")
+}
 
 log.info("Starting YAK Services Health Checking System...")
 log.info("Configuration:")
 log.info("  Port: %d", port)
 log.info("  Check Interval: %d seconds", interval)
 log.info("  Request Timeout: %d seconds", timeout)
+if botWebhook != "" {
+    log.info("  Bot Webhook: %s", botWebhook)
+    // 初始化 bot 客户端
+    try {
+        botClient = bot.New(bot.webhook(botWebhook))
+        if botClient == nil {
+            log.error("Failed to create bot client - returned nil")
+        } else if len(botClient.Configs()) == 0 {
+            log.error("Failed to initialize bot client - no configs found")
+            botClient = nil
+        } else {
+            log.info("Bot client initialized successfully with %d config(s)", len(botClient.Configs()))
+            
+            // 重新定义报警函数，现在 botClient 已经初始化
+            sendHealthAlert = func(healthStatus) {
+                log.info("sendHealthAlert called for service %s", healthStatus["service_id"])
+                if botClient == nil {
+                    log.info("Bot client not configured, skipping alert for service %s", healthStatus["service_id"])
+                    return  // 未配置 bot 客户端
+                }
+                
+                log.info("Processing alert for service %s", healthStatus["service_id"])
+
+                serviceId = healthStatus["service_id"]
+                currentTime = time.Now().Unix()
+
+                // 检查是否在报警间隔内
+                alertedServicesMutex.Lock()
+                shouldAlert = true
+                if serviceId in alertedServices {
+                    lastAlertTime = alertedServices[serviceId]
+                    shouldAlert = (currentTime - lastAlertTime >= alertInterval)
+                }
+                alertedServicesMutex.Unlock()
+
+                if !shouldAlert {
+                    timeSinceLastAlert = currentTime - lastAlertTime
+                    remainingTime = alertInterval - timeSinceLastAlert
+                    log.info("Alert cooldown for service %s: %d seconds remaining", serviceId, remainingTime)
+                    return
+                }
+
+                // 记录本次报警时间
+                alertedServicesMutex.Lock()
+                alertedServices[serviceId] = currentTime
+                alertedServicesMutex.Unlock()
+
+                // 生成报警消息
+                hostname, err = os.Hostname()
+                if err != nil {
+                    hostname = "unknown"
+                }
+
+                alertTime = time.Now().Format("2006-01-02 15:04:05")
+
+                markdown = sprintf(`🚨 服务健康检查报警
+
+## ⚠️ 服务异常
+- **服务名称**: %s
+- **服务ID**: %s
+- **检查URL**: %s
+- **主机**: %s
+- **时间**: %s
+
+## 📊 检查结果
+- **状态码**: %d
+- **健康状态**: ❌ 不健康
+- **检查详情**: %s
+
+## 🔍 响应内容
+%s
+
+---
+*请及时检查服务状态*
+`, healthStatus["service_name"], healthStatus["service_id"], healthStatus["service_name_en"],
+   hostname, alertTime, healthStatus["status_code"], healthStatus["check_detail"], healthStatus["response"])
+
+                // 发送报警
+                try {
+                    botClient.SendMarkdown(markdown)
+                    log.info("Health alert sent for service: %s", serviceId)
+                } catch err {
+                    log.error("Failed to send health alert for service %s: %v", serviceId, err)
+                }
+
+                // 发送简单文本报警（备用）
+                simpleMessage = sprintf("🚨 报警: %s (%s) 服务异常 - 状态码:%d - %s",
+                    healthStatus["service_name"], healthStatus["service_id"],
+                    healthStatus["status_code"], alertTime)
+
+                try {
+                    botClient.SendText(simpleMessage)
+                } catch err {
+                    log.error("Failed to send simple alert text for service %s: %v", serviceId, err)
+                }
+            }
+
+            // 重新定义清除报警状态函数
+            clearAlertStatus = func(serviceId) {
+                alertedServicesMutex.Lock()
+                if serviceId in alertedServices {
+                    delete(alertedServices, serviceId)
+                    log.info("Cleared alert status for service: %s", serviceId)
+                }
+                alertedServicesMutex.Unlock()
+            }
+        }
+    } catch err {
+        log.error("Exception while initializing bot client: %v", err)
+        botClient = nil
+    }
+} else {
+    log.info("  Bot Webhook: Not configured")
+}
 
 // =============================================================================
 // 服务配置模块 - 定义需要监控的服务列表
@@ -122,6 +265,20 @@ serviceConfigs = [
     }
 ]
 
+// 如果启用了 Mock 报警测试模式，添加一个必定失败的服务
+if mockAlert {
+    mockService = {
+        "service_id": "mock_alert_test",
+        "service_name": "Mock 报警测试服务",
+        "service_name_en": "Mock Alert Test Service",
+        "health_url": "http://mock-alert-test-non-existent-domain-12345.invalid",
+        "expect_status": 200,
+        "expect_keywords": ["success"]
+    }
+    serviceConfigs = append(serviceConfigs, mockService)
+    log.info("Mock alert mode enabled, added test failure service")
+}
+
 log.info("Configured %d services for monitoring", len(serviceConfigs))
 
 // =============================================================================
@@ -144,6 +301,11 @@ log.info("Configured %d services for monitoring", len(serviceConfigs))
 
 healthData = []
 healthDataMutex = sync.NewMutex()
+
+// 报警状态跟踪 - 基于时间的报警频率控制（每小时报警一次）
+alertedServices = {}  // 已报警的服务及其最后报警时间 {"service_id": timestamp}
+alertedServicesMutex = sync.NewMutex()
+alertInterval = 3600  // 报警间隔：1小时（3600秒）
 
 log.info("Initialized health data storage with mutex lock")
 
@@ -256,6 +418,17 @@ User-Agent: YAK-Health-Checker/1.0
 }
 
 // =============================================================================
+// 报警功能模块 - 发送健康状态报警
+// 功能: 当服务不健康时发送报警通知，避免重复报警
+// 技术: 使用互斥锁保证线程安全，bot 客户端发送通知
+// 注意: 这些函数将在 botClient 初始化后重新定义
+// =============================================================================
+
+// 报警函数声明 - 将在 botClient 初始化后定义
+sendHealthAlert = nil
+clearAlertStatus = nil
+
+// =============================================================================
 // 批量健康检查模块 - 检查所有配置的服务
 // 功能: 遍历所有服务配置，执行健康检查并更新状态
 // 技术: 并发执行检查，使用互斥锁更新共享数据
@@ -272,13 +445,30 @@ performHealthChecks = func() {
     for config in serviceConfigs {
         healthStatus = checkServiceHealth(config)
         newHealthData = append(newHealthData, healthStatus)
-        
+
         // 输出检查结果
         statusIcon = "✓"
         if !healthStatus["is_healthy"] {
             statusIcon = "✗"
         }
         println(f"  ${statusIcon} ${healthStatus['service_name']} (${healthStatus['service_id']}): ${healthStatus['check_detail']}")
+
+        // 报警逻辑
+        if !healthStatus["is_healthy"] {
+            log.info("Service %s is unhealthy, attempting to send alert", healthStatus["service_id"])
+            if sendHealthAlert != nil {
+                sendHealthAlert(healthStatus)
+            } else {
+                log.info("sendHealthAlert function not initialized yet")
+            }
+        } else {
+            // 服务恢复健康时，清除报警状态
+            if clearAlertStatus != nil {
+                clearAlertStatus(healthStatus["service_id"])
+            } else {
+                log.info("clearAlertStatus function not initialized yet")
+            }
+        }
     }
     
     // 使用互斥锁更新健康数据
@@ -298,6 +488,9 @@ performHealthChecks = func() {
 
 startHealthCheckScheduler = func() {
     log.info("Starting health check scheduler (interval: %d seconds)", interval)
+    
+    // 等待 botClient 初始化完成
+    sleep(1)
     
     // 启动时立即执行一次检查
     performHealthChecks()

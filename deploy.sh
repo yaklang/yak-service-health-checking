@@ -131,10 +131,22 @@ cd "$REPO_DIR"
 
 # 使用 yak 安装 systemd 服务
 echo "Installing systemd service..."
+
+# 构建脚本参数
+SCRIPT_ARGS="--port $SERVICE_PORT --html-dir $REPO_DIR"
+
+# 如果设置了 LARK_BOT_NOTIFY_WEBHOOK 环境变量，添加到脚本参数中
+if [ -n "$LARK_BOT_NOTIFY_WEBHOOK" ]; then
+    echo "Adding bot webhook to service arguments..."
+    SCRIPT_ARGS="$SCRIPT_ARGS --bot-webhook '$LARK_BOT_NOTIFY_WEBHOOK'"
+else
+    echo "No bot webhook configured for service"
+fi
+
 sudo $YAK_ENGINE_PATH install-to-systemd \
     --service-name "$SERVICE_NAME" \
     --script-path "./health-checking.yak" \
-    --script-args "--port $SERVICE_PORT --html-dir $REPO_DIR"
+    --script-args "$SCRIPT_ARGS"
 
 if [ $? -eq 0 ]; then
     echo "✓ Systemd service installed successfully"

@@ -39,10 +39,10 @@ jobs:
           echo "Actor: ${{ github.actor }}"
           echo "============================================"
       
-      - name: Download Yaklang Engine (v1.4.4-alpha1025)
+      - name: Download Yaklang Engine (v1.4.4-alpha1027)
         run: |
-          echo "=== Downloading Yaklang Engine v1.4.4-alpha1025 ==="
-          YAK_VERSION="1.4.4-alpha1025"
+          echo "=== Downloading Yaklang Engine v1.4.4-alpha1027 ==="
+          YAK_VERSION="1.4.4-alpha1027"
           YAK_URL="https://yaklang.oss-accelerate.aliyuncs.com/yak/${YAK_VERSION}/yak_linux_amd64"
           
           echo "Downloading from: $YAK_URL"
@@ -102,21 +102,30 @@ jobs:
       - name: Deploy to remote server
         env:
           HEALTH_CHECKING_HOST_ADDR: ${{ secrets.HEALTH_CHECKING_HOST_ADDR }}
+          LARK_BOT_NOTIFY_WEBHOOK: ${{ secrets.LARK_BOT_NOTIFY_WEBHOOK }}
         run: |
           echo "=== Deploying to remote server ==="
           echo "Target server: $HEALTH_CHECKING_HOST_ADDR"
-          
+
           # 确保部署脚本有执行权限
           chmod +x ./deploy.sh
-          
+
+          # 传递 webhook 参数给部署脚本
+          if [ -n "$LARK_BOT_NOTIFY_WEBHOOK" ]; then
+            echo "Bot webhook configured for deployment"
+            export LARK_BOT_NOTIFY_WEBHOOK="$LARK_BOT_NOTIFY_WEBHOOK"
+          else
+            echo "No bot webhook configured"
+          fi
+
           # 通过 SSH 执行部署脚本
           ./yak ssh -H "$HEALTH_CHECKING_HOST_ADDR" -i /tmp/pri --bash-script ./deploy.sh
-          
+
           if [ $? -ne 0 ]; then
             echo "ERROR: Deployment failed"
             exit 1
           fi
-          
+
           echo "✓ Deployment completed successfully"
       
       - name: Verify deployment
