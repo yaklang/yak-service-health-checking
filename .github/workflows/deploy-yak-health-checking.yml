@@ -121,58 +121,9 @@ jobs:
             CLEANED_WEBHOOK=""
           fi
 
-          # 确保服务器上的代码是最新的
-          echo "Ensuring latest code on remote server..."
-          ./yak ssh -H "$HEALTH_CHECKING_HOST_ADDR" -i /tmp/pri --command "
-            REPO_URL='https://github.com/yaklang/yak-service-health-checking'
-            REPO_DIR='/root/yak-service-health-checking'
-            
-            echo 'Checking repository status...'
-            if [ -d \"\$REPO_DIR\" ]; then
-              echo 'Repository directory exists, checking if it is a git repository...'
-              cd \"\$REPO_DIR\"
-              if [ -d '.git' ]; then
-                echo 'Git repository found, pulling latest changes...'
-                if command -v git >/dev/null 2>&1; then
-                  git fetch origin
-                  git reset --hard origin/main
-                  echo '✓ Repository updated with git'
-                else
-                  echo 'Git command not found, using yak to update...'
-                  cd /root
-                  rm -rf \"\$REPO_DIR\"
-                  yak -c \"git.Clone('\$REPO_URL', '\$REPO_DIR')\"
-                  echo '✓ Repository cloned with yak'
-                fi
-              else
-                echo 'Directory exists but not a git repository, re-cloning...'
-                cd /root
-                rm -rf \"\$REPO_DIR\"
-                if command -v git >/dev/null 2>&1; then
-                  git clone \"\$REPO_URL\" \"\$REPO_DIR\"
-                  echo '✓ Repository cloned with git'
-                else
-                  yak -c \"git.Clone('\$REPO_URL', '\$REPO_DIR')\"
-                  echo '✓ Repository cloned with yak'
-                fi
-              fi
-            else
-              echo 'Repository directory does not exist, cloning...'
-              cd /root
-              if command -v git >/dev/null 2>&1; then
-                git clone \"\$REPO_URL\" \"\$REPO_DIR\"
-                echo '✓ Repository cloned with git'
-              else
-                yak -c \"git.Clone('\$REPO_URL', '\$REPO_DIR')\"
-                echo '✓ Repository cloned with yak'
-              fi
-            fi
-            
-            # 执行部署脚本
-            echo 'Starting deployment...'
-            cd \"\$REPO_DIR\"
-            LARK_BOT_NOTIFY_WEBHOOK='$CLEANED_WEBHOOK' ./deploy.sh
-          "
+          # 使用 CI 中的最新 deploy.sh 脚本远程执行
+          echo "Executing latest deploy.sh script on remote server..."
+          LARK_BOT_NOTIFY_WEBHOOK="$CLEANED_WEBHOOK" ./yak ssh -H "$HEALTH_CHECKING_HOST_ADDR" -i /tmp/pri --bash-script ./deploy.sh
 
           if [ $? -ne 0 ]; then
             echo "ERROR: Deployment failed"

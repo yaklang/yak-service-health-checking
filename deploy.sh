@@ -20,43 +20,67 @@ REQUIRED_VERSION="1.4.4-alpha1027"
 SERVICE_NAME="yak-health-checking"
 SERVICE_PORT="9901"
 
-echo "=== Step 1: 验证代码仓库 ==="
+echo "=== Step 1: 检查和更新代码仓库 ==="
 
-# 检查是否存在仓库目录（CI 应该已经处理了代码更新）
+# 检查是否存在仓库目录
 if [ -d "$REPO_DIR" ]; then
     echo "Repository directory exists: $REPO_DIR"
     cd "$REPO_DIR"
     
-    # 验证是否是正确的仓库
-    if [ -f "health-checking.yak" ]; then
-        echo "✓ Health checking script found"
+    # 检查是否是 git 仓库
+    if [ -d ".git" ]; then
+        echo "Git repository found, pulling latest changes..."
+        if command -v git >/dev/null 2>&1; then
+            git fetch origin
+            git reset --hard origin/main
+            echo "✓ Repository updated with git"
+        else
+            echo "Git command not found, using yak to update..."
+            cd /root
+            rm -rf "$REPO_DIR"
+            yak -c "git.Clone('$REPO_URL', '$REPO_DIR')"
+            echo "✓ Repository cloned with yak"
+        fi
     else
-        echo "ERROR: health-checking.yak not found in $REPO_DIR"
-        exit 1
-    fi
-    
-    # 显示当前版本信息
-    if [ -d ".git" ] && command -v git >/dev/null 2>&1; then
-        CURRENT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-        echo "Current commit: $CURRENT_COMMIT"
+        echo "Directory exists but not a git repository, re-cloning..."
+        cd /root
+        rm -rf "$REPO_DIR"
+        if command -v git >/dev/null 2>&1; then
+            git clone "$REPO_URL" "$REPO_DIR"
+            echo "✓ Repository cloned with git"
+        else
+            yak -c "git.Clone('$REPO_URL', '$REPO_DIR')"
+            echo "✓ Repository cloned with yak"
+        fi
     fi
 else
-    echo "ERROR: Repository directory $REPO_DIR does not exist"
-    echo "This should have been handled by CI. Attempting fallback..."
-    
-    # 备用方案：尝试克隆仓库
+    echo "Repository directory does not exist, cloning..."
     cd /root
     if command -v git >/dev/null 2>&1; then
         git clone "$REPO_URL" "$REPO_DIR"
-        echo "✓ Repository cloned as fallback"
+        echo "✓ Repository cloned with git"
     else
-        echo "ERROR: Git not available and repository not found"
-        exit 1
+        yak -c "git.Clone('$REPO_URL', '$REPO_DIR')"
+        echo "✓ Repository cloned with yak"
     fi
-    cd "$REPO_DIR"
 fi
 
-echo "✓ Repository verification completed"
+# 确保在正确的目录并验证文件
+cd "$REPO_DIR"
+if [ -f "health-checking.yak" ]; then
+    echo "✓ Health checking script found"
+else
+    echo "ERROR: health-checking.yak not found in $REPO_DIR"
+    exit 1
+fi
+
+# 显示当前版本信息
+if [ -d ".git" ] && command -v git >/dev/null 2>&1; then
+    CURRENT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+    echo "Current commit: $CURRENT_COMMIT"
+fi
+
+echo "✓ Repository update completed"
 
 echo ""
 echo "=== Step 2: 检查和安装 YAK 引擎 ==="
@@ -147,10 +171,13 @@ SCRIPT_ARGS="--port $SERVICE_PORT --html-dir $REPO_DIR"
 # 如果设置了 LARK_BOT_NOTIFY_WEBHOOK 环境变量，添加到脚本参数中
 if [ -n "$LARK_BOT_NOTIFY_WEBHOOK" ]; then
     echo "Adding bot webhook to service arguments..."
+    echo "Webhook configured: ${LARK_BOT_NOTIFY_WEBHOOK:0:50}..." # 只显示前50个字符
     SCRIPT_ARGS="$SCRIPT_ARGS --bot-webhook '$LARK_BOT_NOTIFY_WEBHOOK'"
 else
     echo "No bot webhook configured for service"
 fi
+
+echo "Final script arguments: $SCRIPT_ARGS"
 
 sudo $YAK_ENGINE_PATH install-to-systemd \
     --service-name "$SERVICE_NAME" \
