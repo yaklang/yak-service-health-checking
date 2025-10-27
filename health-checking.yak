@@ -346,6 +346,7 @@ sendHealthAlert = func(healthStatus) {
     // 检查是否在报警间隔内
     alertedServicesMutex.Lock()
     shouldAlert = true
+    lastAlertTime = 0
     if serviceId in alertedServices {
         lastAlertTime = alertedServices[serviceId]
         shouldAlert = (currentTime - lastAlertTime >= alertInterval)
