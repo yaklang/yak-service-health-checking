@@ -123,7 +123,13 @@ jobs:
 
           # 使用 CI 中的最新 deploy.sh 脚本远程执行
           echo "Executing latest deploy.sh script on remote server..."
-          LARK_BOT_NOTIFY_WEBHOOK="$CLEANED_WEBHOOK" ./yak ssh -H "$HEALTH_CHECKING_HOST_ADDR" -i /tmp/pri --bash-script ./deploy.sh
+          if [ -n "$CLEANED_WEBHOOK" ]; then
+            echo "Setting webhook environment variable on remote server..."
+            ./yak ssh -H "$HEALTH_CHECKING_HOST_ADDR" -i /tmp/pri --command "export LARK_BOT_NOTIFY_WEBHOOK='$CLEANED_WEBHOOK'"
+          fi
+          
+          # 执行部署脚本，并确保环境变量传递
+          ./yak ssh -H "$HEALTH_CHECKING_HOST_ADDR" -i /tmp/pri --command "LARK_BOT_NOTIFY_WEBHOOK='$CLEANED_WEBHOOK' bash -s" < ./deploy.sh
 
           if [ $? -ne 0 ]; then
             echo "ERROR: Deployment failed"
