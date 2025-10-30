@@ -182,8 +182,8 @@ serviceConfigs = [
         "service_name": "YAK Embedding Service",
         "service_name_en": "YAK Embedding Service",
         "health_url": "https://embedding.yaklang.com",
-        "expect_status": 404,
-        "expect_keywords": ["invalid_request_error"]
+        "expect_status": 200,
+        "expect_keywords": ["Hello Yak!"]
     },
 ]
 
