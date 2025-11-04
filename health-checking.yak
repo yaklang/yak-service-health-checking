@@ -183,7 +183,8 @@ serviceConfigs = [
         "service_name_en": "YAK Embedding Service",
         "health_url": "https://embedding.yaklang.com",
         "expect_status": 200,
-        "expect_keywords": ["Hello Yak!"]
+        "expect_keywords": ["Hello Yak!"],
+        "retry_times": 3
     },
 ]
 
@@ -242,7 +243,7 @@ log.info("Initialized health data storage with mutex lock")
 // - 服务健康状态对象
 // =============================================================================
 
-checkServiceHealth = func(config) {
+checkServiceHealthOneTime = func(config) {
     log.info("Checking health for service: %s", config["service_id"])
     
     serviceId = config["service_id"]
@@ -336,6 +337,65 @@ User-Agent: YAK-Health-Checker/1.0
     }
     
     return healthStatus
+}
+
+// =============================================================================
+// 健康检查执行模块 - 检查单个服务的健康状态（支持重试）
+// 功能: 向指定服务发送 HTTP 请求，获取健康状态，支持重试机制
+// 技术: 调用 checkServiceHealthOneTime 实现单次检查，循环实现重试
+//
+// 参数:
+// - config: 服务配置对象
+//
+// 返回:
+// - 服务健康状态对象
+// =============================================================================
+
+checkServiceHealth = func(config) {
+    log.info("Checking health for service: %s", config["service_id"])
+
+    serviceId = config["service_id"]
+    retryTimes = config["retry_times"] || 1
+
+    // 如果不需要重试，直接调用单次检查
+    if retryTimes <= 1 {
+        return checkServiceHealthOneTime(config)
+    }
+
+    log.info("Service %s configured with %d retry attempts", serviceId, retryTimes)
+
+    // 重试循环
+    for attempt = 1; attempt <= retryTimes; attempt++ {
+        log.info("Attempt %d/%d for service %s", attempt, retryTimes, serviceId)
+
+        // 执行单次健康检查
+        healthStatus = checkServiceHealthOneTime(config)
+
+        // 如果检查成功，直接返回
+        if healthStatus["is_healthy"] {
+            if attempt > 1 {
+                log.info("Service %s succeeded on attempt %d/%d", serviceId, attempt, retryTimes)
+                // 更新检查详情，显示重试成功信息
+                healthStatus["check_detail"] = f"${healthStatus['check_detail']} (succeeded on attempt ${attempt}/${retryTimes})"
+            }
+            return healthStatus
+        }
+
+        // 如果是最后一次尝试，返回失败结果
+        if attempt == retryTimes {
+            log.warn("Service %s failed all %d attempts", serviceId, retryTimes)
+            // 更新检查详情，显示所有重试都失败
+            healthStatus["check_detail"] = f"${healthStatus['check_detail']} (all ${retryTimes} attempts failed)"
+            return healthStatus
+        }
+
+        // 等待 2 秒后重试
+        log.info("Service %s attempt %d/%d failed, retrying in 2 seconds...", serviceId, attempt, retryTimes)
+        sleep(2)
+    }
+
+    // 理论上不会到达这里，但为了安全起见
+    return checkServiceHealthOneTime(config)
 }
 
 // =============================================================================
