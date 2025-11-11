@@ -186,6 +186,7 @@ serviceConfigs = [
         "expect_keywords": ["Hello Yak!"],
         "retry_times": 3
     },
+    {
         "service_id": "code_helper",
         "service_name": "Yaklang 代码助手",
         "service_name_en": "Yaklang Code Helper",
@@ -663,7 +664,11 @@ startHealthCheckScheduler = func() {
 startHTTPServer = func() {
     log.info("Starting HTTP server on 0.0.0.0:%d", port)
     
-    pwd = os.Getwd()~
+    pwd, err = os.Getwd()
+    if err != nil {
+        log.warn("Failed to get current working directory: %v", err)
+        pwd = "."
+    }
 
     // 读取 HTML 文件（尝试多个可能的路径）
     possiblePaths = [
