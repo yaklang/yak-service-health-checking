@@ -167,7 +167,7 @@ serviceConfigs = [
         "service_name_en": "Yaklang AI Balance",
         "health_url": "https://aibalance.yaklang.com",
         "expect_status": 200,
-        "expect_keywords": ["AI Balance", "Orbitron"]
+        "expect_keywords": ["AIBALANCE", "AI Gateway"]
     },
     {
         "service_id": "codescan_ssa",
@@ -185,14 +185,6 @@ serviceConfigs = [
         "expect_status": 200,
         "expect_keywords": ["Hello Yak!"],
         "retry_times": 3
-    },
-    {
-        "service_id": "code_helper",
-        "service_name": "Yaklang 代码助手",
-        "service_name_en": "Yaklang Code Helper",
-        "health_url": "https://code-helper.yaklang.com",
-        "expect_status": 200,
-        "expect_keywords": ["编程助手", "Yaklang"],
     },
 ]
 
