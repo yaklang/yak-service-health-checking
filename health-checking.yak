@@ -170,12 +170,12 @@ serviceConfigs = [
         "expect_keywords": ["AIBALANCE", "AI Gateway"]
     },
     {
-        "service_id": "codescan_ssa",
-        "service_name": "SSA 代码扫描",
-        "service_name_en": "SSA Code Scan",
-        "health_url": "https://codescan.ssa.to",
-        "expect_status": 404,
-        "expect_keywords": ["404", "not found"]
+        "service_id": "id_redhaze_top",
+        "service_name": "红幕科技综合门户",
+        "service_name_en": "RedHaze Group Portal",
+        "health_url": "https://id.redhaze.top/home",
+        "expect_status": 200,
+        "expect_keywords": ["RedHaze Group", "红幕科技"]
     },
 ]
 
